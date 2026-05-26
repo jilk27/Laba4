@@ -2,19 +2,15 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
-#include <cstdlib>   // rand
+#include <cstdlib>  
 #include <cmath>
 
-// ──────────────────────────────────────────────
-//  Параметры изображения
-// ──────────────────────────────────────────────
+
 static constexpr size_t WIDTH  = 1024;
 static constexpr size_t HEIGHT = 1024;
 static constexpr unsigned char THRESHOLD = 128;
 
-// ──────────────────────────────────────────────
-//  CPU-версия пороговой фильтрации
-// ──────────────────────────────────────────────
+
 void thresholdFilterCPU(const std::vector<unsigned char>& src,
                               std::vector<unsigned char>& dst,
                         size_t width, size_t height,
@@ -27,7 +23,6 @@ void thresholdFilterCPU(const std::vector<unsigned char>& src,
 int main()
 {
     try {
-        // ── Выбор устройства ──────────────────────────────────────────────
         sycl::queue q(sycl::default_selector_v,
                       [](sycl::exception_list el) {
                           for (auto& e : el)
@@ -38,7 +33,6 @@ int main()
                   << q.get_device().get_info<sycl::info::device::name>()
                   << "\n\n";
 
-        // ── Инициализация изображения ─────────────────────────────────────
         const size_t NPIX = WIDTH * HEIGHT;
 
         std::vector<unsigned char> img(NPIX);
@@ -49,9 +43,7 @@ int main()
         for (size_t i = 0; i < NPIX; ++i)
             img[i] = static_cast<unsigned char>(std::rand() % 256);
 
-        // ─────────────────────────────────────────────────────────────────
-        //  CPU
-        // ─────────────────────────────────────────────────────────────────
+
         auto t0 = std::chrono::high_resolution_clock::now();
         thresholdFilterCPU(img, out_cpu, WIDTH, HEIGHT, THRESHOLD);
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -60,11 +52,8 @@ int main()
             std::chrono::duration<double, std::milli>(t1 - t0).count();
         std::cout << "CPU time : " << cpu_ms << " ms\n";
 
-        // ─────────────────────────────────────────────────────────────────
-        //  GPU / SYCL  (2D ND-range)
-        // ─────────────────────────────────────────────────────────────────
+
         {
-            // Хранение изображения — плоский 1D массив, индексация [row*W+col]
             sycl::buffer<unsigned char, 1> bufSrc(img.data(),     sycl::range<1>(NPIX));
             sycl::buffer<unsigned char, 1> bufDst(out_gpu.data(), sycl::range<1>(NPIX));
 
@@ -77,11 +66,8 @@ int main()
                 const unsigned char T = THRESHOLD;
                 const size_t W = WIDTH;
 
-                // 2D ND-range: первое измерение — строки (height),
-                //              второе — столбцы (width)
                 h.parallel_for(sycl::range<2>(HEIGHT, WIDTH),
                                [=](sycl::id<2> idx) {
-                    // idx[0] — row, idx[1] — col
                     size_t pos = idx[0] * W + idx[1];
                     accDst[pos] = (accSrc[pos] > T) ? 255u : 0u;
                 });
@@ -96,11 +82,9 @@ int main()
             std::cout << "GPU time : " << gpu_ms << " ms\n";
             std::cout << "Ускорение: " << cpu_ms / gpu_ms << "x\n\n";
 
-        } // ← RAII: bufDst копирует out_gpu с устройства
+        }
 
-        // ─────────────────────────────────────────────────────────────────
-        //  Проверка корректности
-        // ─────────────────────────────────────────────────────────────────
+
         bool ok = true;
         for (size_t i = 0; i < NPIX; ++i) {
             if (out_cpu[i] != out_gpu[i]) {
@@ -114,9 +98,7 @@ int main()
         std::cout << "Результаты " << (ok ? "совпадают ✓" : "не совпадают ✗")
                   << "\n";
 
-        // ─────────────────────────────────────────────────────────────────
-        //  Мини-статистика (для наглядности)
-        // ─────────────────────────────────────────────────────────────────
+
         size_t white_pixels = 0;
         for (size_t i = 0; i < NPIX; ++i)
             if (out_cpu[i] == 255) ++white_pixels;
